@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
 from ase.io import read
 from ase.calculators.emt import EMT
-from ML_vib import vibration_analysis
+from mlvib.vibration_analysis import Vibration_analysis
 from ase.vibrations import Vibrations
 
 def compare_to_ASE(molecule=None, file=None, threshold=1, print_detailed=False):
@@ -18,26 +19,16 @@ def compare_to_ASE(molecule=None, file=None, threshold=1, print_detailed=False):
         pass
     vib.run()
     w2 = vib.get_energies()
-    C2 = vib.Q
     # Calculate using own code:
-    vib = vibration_analysis(molecule)
-    C1 = vib.calculate_dynamic_matrix()
-    #C3 = vib.calculate_dynamic_matrix()
-    
-    np.set_printoptions(precision=4)
-    
-   
-
-    
-    
-
+    vib = Vibration_analysis(molecule)
+    vib.calculate_dynamic_matrix()
     w1 = vib.w
     # COMPARE THAT GARBAGE
     assert w1.shape == w2.shape
     wdiff = w2-w1
 
 
-
+    np.set_printoptions(precision=4)
 
     P = abs((w2-w1)/w2*100)
     idx1 = (w1.real > 10**(-4))*(w2.real > 10**(-4))
@@ -66,5 +57,25 @@ def compare_to_ASE(molecule=None, file=None, threshold=1, print_detailed=False):
     return name, state
 
 
+if __name__ == '__main__':
+    from ase.io import read
+    
+    if sys.argv[1] == 'test2':
+        import glob
+        test_files = glob.glob('../EMT_test_molecules/*.traj')
+        print(50*'#')
+        print('|Molecule|')
+        fail_count = 0
+        passed = []; failed = []
+        for file in test_files:
+            state = compare_to_ASE(file=file, print_detailed=False)
+
+
+            
+            
+        print('Total tests: {}'.format(len(test_files)))
+        print('Number passed: {}'.format(len(test_files)-fail_count))
+        print('Number failed {}'.format(fail_count))
+        
 
 
