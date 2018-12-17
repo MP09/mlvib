@@ -145,13 +145,13 @@ nn
             
             return self.w, modes_out
 
+
     def get_hessian(self):
         if hasattr(self, 'C'):
             return self.C
         else:
             self.calculate_dynamic_matrix()
             return self.C
-
 
 def vib_spectrum(vib, fig=None, ax=None):
 
