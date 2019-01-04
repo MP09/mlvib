@@ -1,7 +1,7 @@
 import numpy as np
 
-from mlvib.gaussian_process import Gaussian_process
-from mlvib.kernels import RBF
+from gaussian_process import Gaussian_process
+from kernels import RBF
 
 import matplotlib.pyplot as plt
 
@@ -103,7 +103,7 @@ class Active_Learner:
         count = self.GP.n
         state = True
         while state:
-
+            
             if smart:
                 self.choose(1)
             else:
@@ -188,16 +188,16 @@ if __name__ == '__main__':
 #    np.random.seed(100)
 
     # 2D Example:
-    func = lambda x, y: x*np.sin(np.cos(x)) + y*np.cos(x)
-    num_inputs = 2
-    input_dim = 1
-    region = [(-10, 10), (-10, 10)]
+    #func = lambda x, y: x*np.sin(np.cos(x)) + y*np.cos(x)
+    #num_inputs = 2
+    #input_dim = 1
+    #region = [(-10, 10), (-10, 10)]
     
     # 1D Example:
-    #func = lambda x: np.sin(np.cos(x))*x
-    #num_inputs = 1
-    #input_dim = 1
-    #region = [(-20, 20)]
+    func = lambda x: np.sin(np.cos(x))*x
+    num_inputs = 1
+    input_dim = 1
+    region = [(-20, 20)]
 
 
     samples = 10

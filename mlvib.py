@@ -1,6 +1,5 @@
 import numpy as np
 import ase.units as units
-
 from timeit import default_timer as dt
 from mlvib.gaussian_process import Gaussian_process, GPCalculator
 from mlvib.vibration_analysis import Vibration_analysis

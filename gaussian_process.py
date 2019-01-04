@@ -142,39 +142,37 @@ class GPCalculator(Calculator):
 
         # Calculate forces:
         if 'forces' in properties:
+
+            self.results['forces'] = np.zeros((len(atoms), 3))
             # d = 0.001                                                                               
             # forces = np.zeros((len(atoms), 3))
             # for ii in range(len(atoms)):
             #    forces[ii] = [numeric_force(atoms, ii, i, d) for i in range(3)]
             # self.results['forces'] = forces
 
-
-            d = 0.001
-            features = np.zeros((6*len(atoms), feature.size))
-            c = 0
-            for a in range(len(atoms)):
-                p0 = atoms.get_positions()
-                for i in [0, 1, 2]:
-                    p = p0.copy()
-                    p[a, i] += d
-                    atoms.set_positions(p)
-                    features[c, :] = self.descriptor(atoms)
-                    p[a, i] -= 2*d
-                    atoms.set_positions(p)
-                    features[c+1, :] = self.descriptor(atoms)
-                    atoms.set_positions(p0)
-                    c += 2
-
-            E = self.GP.predict(features, return_std=False)
-            
-            forces = np.zeros((len(atoms), 3))
-
-            c = 0
-            for i in range(len(atoms)):
-                for dire in [0, 1, 2]:
-                    forces[i, dire] = (E[c+1]-E[c])/(2 * d)
-                    c += 2
-            self.results['forces'] = forces
+            # d = 0.001
+            # features = np.zeros((6*len(atoms), feature.size))
+            # c = 0
+            # for a in range(len(atoms)):
+            #     p0 = atoms.get_positions()
+            #     for i in [0, 1, 2]:
+            #         p = p0.copy()
+            #         p[a, i] += d
+            #         atoms.set_positions(p)
+            #         features[c, :] = self.descriptor(atoms)
+            #         p[a, i] -= 2*d
+            #         atoms.set_positions(p)
+            #         features[c+1, :] = self.descriptor(atoms)
+            #         atoms.set_positions(p0)
+            #         c += 2
+            # E = self.GP.predict(features, return_std=False)
+            # forces = np.zeros((len(atoms), 3))
+            # c = 0
+            # for i in range(len(atoms)):
+            #     for dire in [0, 1, 2]:
+            #         forces[i, dire] = (E[c+1]-E[c])/(2 * d)
+            #         c += 2
+            # self.results['forces'] = forces
 
 
             
