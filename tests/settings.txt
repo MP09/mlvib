@@ -1,0 +1,5 @@
+calc = ORCA(label='orca',
+               maxiter=2000,
+               charge=0, mult=1,task='gradient',
+               orcasimpleinput='PBE def2-TZVP ExtremeSCF',
+               orcablocks='%scf Convergence verytight \n maxiter 300 end! AnFreq \n%maxcore 3000\n%pal nprocs 1 end')

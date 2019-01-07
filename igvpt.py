@@ -513,7 +513,41 @@ class IGVPT:
             self.generate_QFF()
             self.summarize_results()
 
-    def approximate_anharmonics(self, descriptor, kernel):
+    def calculate_and_wait(self, indexs, wait_time=10):
+        """
+        Queues the calculations specified by indexs and waits for them to finish. 
+
+        Parameters:
+        -- indexs: List of numbers indexing self.QFF_atoms. 
+        """
+
+        # Check if the calculation have been done previously:
+        good_idxs = []
+        for i in indexs:
+            if not os.path.exists(self.QFF_folder + 'job_{}/.finished'.format(i)):
+                good_idxs.append(i)
+
+        # Queue the calculations:
+        num_calculations = len(good_idxs)
+
+        if num_calculations > 0:
+            print('Calculating: ', good_idxs)
+            os.chdir(self.QFF_folder)
+            calculate_specifics(good_idxs, self.name+'QFF.traj', num_calculations, self.name)
+            subprocess.run('sbatch job_file.sh', shell=True)
+            os.chdir(self.top_folder)
+
+            # Wait for them to finish:
+            calculating = np.array([True for i in good_idxs])
+            while True in calculating:
+                for i in range(len(good_idxs)):
+                    calculating[i] = not os.path.exists(self.QFF_folder + 'job_{}/.finished'.
+                                                        format(good_idxs[i]))
+                if True in calculating:
+                    sleep(wait_time)
+
+        
+    def approximate_anharmonics(self, descriptor, kernel, print_summary=False, use_gs_prior=True):
         """
         Main function for calculating anharmonics by approxixmating the PES with a gaussian process. 
 
@@ -548,8 +582,24 @@ class IGVPT:
                 harm_features[i+1, :] = descriptor(atoms)
             E_harm = np.array([atoms.get_potential_energy() for atoms in harm_atoms]).reshape(-1, 1)
 
+            # Dump the calculator:
+            with open(self.QFF_folder+'calc.pckl', 'wb') as pickle_file:
+                pickle.dump(self.QFF_calc, pickle_file)
+            
+
+            # Add the groundstate as the prior:
+            if use_gs_prior:
+                # Calculate if required:
+                self.calculate_and_wait([0])
+
+                # Find calculation:
+                atoms = read(self.QFF_folder + 'job_0/atoms.traj')
+                prior = atoms.get_potential_energy()
+            else:
+                prior = 0
+                
             # Intialize Gaussian Process with harmonic calculations:
-            self.GP = Gaussian_process(harm_features, E_harm, kernel)
+            self.GP = Gaussian_process(harm_features, E_harm, kernel, prior=prior)
             self.GP.fit()
             
             # Calculate features of all QFF displacements:
@@ -570,48 +620,21 @@ class IGVPT:
 
             remainder = self.num_extra
             index_mask = np.array([False for i in range(self.num_extra)])
+            count = 0
             while remainder > 0:
 
                 # Pick the next configuration(s) to calculate:
 
                 # Variance based:
-                #variance = self.GP.variance(self.features)
-                #temp_idxs = np.argsort(-variance)[0:self.concurrent_calculations]
+                variance = self.GP.variance(self.features)
+                idxs = np.argsort(-variance)[0:self.concurrent_calculations]
                 
                 # Random:
-                temp_idxs = np.random.choice(np.argwhere(index_mask==False).reshape(-1),
-                            self.concurrent_calculations)
-
-                # Check if the calculations have be done previously:
-                idxs = []
-                for i, idx in enumerate(temp_idxs):
-                    if not os.path.exists(self.QFF_folder + 'job_{}/.finished'.format(idx)):
-                        idxs.append(idx)
-                idxs = np.array(idxs)
-                print(idxs)
+                #idxs = np.random.choice(np.argwhere(index_mask==False).reshape(-1),
+                #            self.concurrent_calculations)
                 
-                if idxs.size:
-                    os.chdir(self.QFF_folder)
-                    with open('calc.pckl', 'wb') as pickle_file:
-                        pickle.dump(self.QFF_calc, pickle_file)
-                        calculate_specifics(idxs, self.name+'QFF.traj', self.concurrent_calculations,
-                                            self.name)
-                        subprocess.run('sbatch job_file.sh', shell=True)
-                    os.chdir(self.top_folder)
-
-                idxs = temp_idxs.copy()
-                # Wait for them ...
-                calculation_running = True
-                while calculation_running:
-                    calcs_running = 0
-                    for idx in idxs:
-                        if not os.path.exists(self.QFF_folder + 'job_{}/.finished'.format(idx)):
-                            calcs_running += 1
-                    if calcs_running == 0:
-                        calculation_running = False
-                    else:
-                        sleep(self.time_between_checks)
-
+                self.calculate_and_wait(idxs, self.time_between_checks)
+                
                 # When finished add them to GP
                 E = np.zeros(self.concurrent_calculations)
                 for i, idx in enumerate(idxs):
@@ -626,11 +649,14 @@ class IGVPT:
                 self.E_QFF = self.GP.predict(self.features)
                 self.write_gabs(use_atoms=False)
                 self.generate_QFF()
-                self.history.append(self.summarize_results(print_summary=True))
+                self.history.append(self.summarize_results(print_summary=print_summary))
 
                 remainder -= self.concurrent_calculations
 
                 remaining = np.argwhere(index_mask == False).reshape(-1)
+                count += 1
+
+            self.history = np.array(self.history)
                 
                 
 

@@ -4,7 +4,7 @@ from ase.calculators.calculator import Calculator, all_changes
 from mlvib.kernels import RBF
 
 class Gaussian_process:
-    def __init__(self, X, y, kernel, alpha=10**(-10)):
+    def __init__(self, X, y, kernel, alpha=10**(-10), prior=0):
         """
         Gaussian Process for regression: 
 
@@ -28,6 +28,7 @@ class Gaussian_process:
         self.kernel = kernel
         self.alpha = alpha
         self.fitted = False
+        self.prior = prior
 
         
         # Data matrix:
@@ -35,7 +36,7 @@ class Gaussian_process:
             X = X.reshape(X.size, 1)
 
         self.X = X
-        self.y = y
+        self.y = y-self.prior
             
         # Dimensions:
         self.n, self.d = X.shape
@@ -58,6 +59,7 @@ class Gaussian_process:
         if y.ndim == 1:
             y = y.reshape(y.size, 1)
 
+        y -= self.prior
         num_elems = x.shape[0]
         
         self.X = np.vstack([self.X, x])
@@ -85,7 +87,7 @@ class Gaussian_process:
             x.reshape(x.size, 1)
 
         K = self.kernel(x, self.X)
-        out = (K @ self.w).reshape(len(x))
+        out = (K @ self.w).reshape(len(x))+self.prior
         
         if return_std == True:
             var = self.kernel.diag(x)
