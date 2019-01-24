@@ -117,7 +117,6 @@ class Gaussian_process:
         error = np.abs(prediction-y)
         return error
 
-
 class GPCalculator(Calculator):
 
     def __init__(self, GP, descriptor, **kwargs):
