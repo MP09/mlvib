@@ -45,4 +45,33 @@ def feature_histogram(features, fig=None, ax=None):
 
     return fig, ax
 
+def error_plot(history, reference, plot=True):
+    """
+    Plots the error as a function of steps. 
+    """
+
+    fig, ax = plt.subplots()
+
+    error = np.abs(history-reference)
+
+    for i in range(error.shape[1]):
+        ax.plot(error[:, i], label='{}'.format(i), linewidth=2)
+
+    ax.set_xlim([0, error.shape[0]-1])
+    ax.set_ylim([0, 500])
+    ax.set_xlabel('Iteration [#]', fontsize=12)
+    ax.set_ylabel(r'Absolute Error [cm$^{-1}$]', fontsize=12)
+    
+
+    plt.legend()
+    plt.tight_layout()    
+    if plot:
+        plt.show()
+
+    return fig, ax
+
+
+
+
+    
     

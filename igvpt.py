@@ -1,22 +1,19 @@
 import numpy as np
-import ase.units as units
-#from vibration_analysis import Vibration_analysis
-from mlvib.template import template, generate_file, gab, compute_file, log, vpt_file
-from mlvib.calculate_trajectory import calculate_trajectory
-from mlvib.calculate_specifics import calculate_specifics
-from mlvib.gaussian_process import Gaussian_process
-from ase.io import Trajectory, read, write
-from ase.db import connect
-
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.preprocessing import MinMaxScaler
-
-from time import sleep
 import pickle
 import subprocess
 import glob
 import os
 import re
+import ase.units as units
+
+from time import sleep
+from ase.io import Trajectory, read, write
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.gaussian_process import GaussianProcessRegressor
+
+from mlvib.calculate_specifics import calculate_specifics
+from mlvib.calculate_trajectory import calculate_trajectory
+from mlvib.template import template, generate_file, gab, compute_file, log, vpt_file
 
 eV_to_kcal = 23.06055 
 eV_to_Ha = 0.0367493
@@ -28,7 +25,8 @@ eV_to_cm = 8065.544
 
 class IGVPT:
 
-    def __init__(self, atoms, calc, QFF_calc=None, name='test', delta=0.01, nmodes=2):
+    def __init__(self, atoms, calc, QFF_calc=None, name='test', delta=0.01, nmodes=2,
+                 calc_settings={}, displacement=0.01):
         """
         ASE interface to iGVPT2 program. 
 
@@ -40,6 +38,12 @@ class IGVPT:
 
         Inputs:
         - atoms: ASE atoms object (relaxed).
+        - calculator: ASE calculator objecet.
+        - QFF_calc: Seperate QFF calculator object if required.
+        - name: str, name.
+        - delta: Magnitude of displacements for harmonics.
+        - displacement: Magnitude of displacement for QFF
+        - calc_settings: dict of settings for calculate_trajectory queueing code. 
         """
 
         # Atoms object:
@@ -49,10 +53,13 @@ class IGVPT:
         self.num_normals = 3*self.num_atoms-6
 
         # Settings:
-        self.delta = 0.01
-        self.displacement = 0.01
+        self.delta = delta
+        self.displacement = displacement
         self.nmodes = nmodes
 
+        # Calculation queueing things:
+        self.calc_settings = calc_settings
+        
         # How many QFF calculations are required:
         if self.nmodes == 1:
             self.num_extra = 1+2*self.num_normals
@@ -74,7 +81,7 @@ class IGVPT:
         self.ML_folder = 'ML/'
         self.GS_folder = 'GS/'
         for folder in [self.harm_folder, self.ici_folder, self.gab_folder, self.QFF_folder,
-                       self.ML_folder, self.GS_folder]:
+                       self.ML_folder, self.GS_folder, self.ML_folder+'GP_folder/']:
             if not os.path.exists(folder):
                 os.mkdir(folder)
         self.top_folder = os.getcwd()
@@ -131,8 +138,12 @@ class IGVPT:
 
         write('gs.traj', self.atoms)
 
-        calculate_trajectory('gs.traj', 1, self.name+'gs')
-        subprocess.run('sbatch job_file.sh', shell=True)
+        self.calc_settings['traj_file'] = 'gs.traj'
+        self.calc_settings['num_jobs'] = 1
+        self.calc_settings['job_name'] = self.name+'gs'
+
+        calculate_trajectory(self.calc_settings)
+        #subprocess.run('sbatch job_file.sh', shell=True)
         subprocess.run('echo "running" > .checkpoint', shell=True)
         os.chdir(self.top_folder)
                 
@@ -149,8 +160,11 @@ class IGVPT:
         num_calcs = 6*self.num_atoms+1
         if not os.path.exists('out/'):
             os.mkdir('out/')
-        calculate_trajectory(self.name+'_disp.traj', num_calcs, self.name)
-        subprocess.run('sbatch job_file.sh', shell=True)
+
+        self.calc_settings['traj_file'] = self.name+'_disp.traj'
+        self.calc_settings['num_jobs'] = num_calcs
+        self.calc_settings['job_name'] = self.name
+        calculate_trajectory(self.calc_settings)
         subprocess.run('echo "running" > .checkpoint', shell=True)
         os.chdir(self.top_folder)
 
@@ -237,28 +251,32 @@ class IGVPT:
         
     def read_ici(self):        
         self.num_extra = len(glob.glob(self.ici_folder + self.name +'QFF_*'))
-        
-        traj = Trajectory(self.QFF_folder + self.name + 'QFF.traj', mode='w')
-        for num in range(0, self.num_extra):
-            f = self.ici_folder + self.name + 'QFF_{}.ici'.format(num)
-            with open(f, 'r') as open_file:
-                prev = 'kage'
-                pos = np.zeros((self.num_atoms, 3))
-                i = 0
-                for sz, line in enumerate(open_file.readlines()):
-                    if line == 'Geometry\n':
-                        prev = 'geo'
-                        continue
-                    if prev == 'geo':
-                        prev = 'numbers'
-                        continue
-                    if prev == 'numbers':
-                        pos[i] = [float(x) for x in re.findall(r"[-+]?\d*\.\d+|\d+", line)[4:7]]
-                        i += 1
-            atoms = self.atoms.copy()
-            atoms.set_positions(pos)
-            self.QFF_atoms.append(atoms)
-            traj.write(atoms)
+
+        if not os.path.exists(self.QFF_folder + self.name + 'QFF.traj'):
+            traj = Trajectory(self.QFF_folder + self.name + 'QFF.traj', mode='w')
+            for num in range(0, self.num_extra):
+                f = self.ici_folder + self.name + 'QFF_{}.ici'.format(num)
+                with open(f, 'r') as open_file:
+                    prev = 'kage'
+                    pos = np.zeros((self.num_atoms, 3))
+                    i = 0
+                    for sz, line in enumerate(open_file.readlines()):
+                        if line == 'Geometry\n':
+                            prev = 'geo'
+                            continue
+                        if prev == 'geo':
+                            prev = 'numbers'
+                            continue
+                        if prev == 'numbers':
+                            pos[i] = [float(x) for x in re.findall(r"[-+]?\d*\.\d+|\d+", line)[4:7]]
+                            i += 1
+                            
+                atoms = self.atoms.copy()
+                atoms.set_positions(pos)
+                self.QFF_atoms.append(atoms)
+                traj.write(atoms)
+        else:
+            self.QFF_atoms = read(self.QFF_folder + self.name + 'QFF.traj', index=':')
         
     def calculate_QFF(self):
         """
@@ -270,8 +288,12 @@ class IGVPT:
             pickle.dump(self.QFF_calc, pickle_file)
         
         num_calcs = len(self.QFF_atoms)
-        calculate_trajectory(self.name+'QFF.traj', num_calcs, self.name)
-        subprocess.run('sbatch job_file.sh', shell=True)
+        self.calc_settings['traj_file'] =self.name+'QFF.traj'
+        self.calc_settings['num_jobs'] = num_calcs
+        self.calc_settings['job_name'] = self.name
+
+        calculate_trajectory(self.calc_settings)
+
         subprocess.run('echo "running" > .checkpoint', shell=True)
         os.chdir(self.top_folder)
 
@@ -461,7 +483,7 @@ class IGVPT:
             with open(folder+'harmonics.out', 'w') as f:
                 print(infile.format(**fill_dict), file=f)
 
-    def summarize_results(self, print_summary=True):
+    def summarize_results(self, print_summary=True, references=None):
         """
         Read output file from igvpt2
         """
@@ -482,7 +504,10 @@ class IGVPT:
                     start = True
                     startsoon = False
                     if print_summary:
-                        print('| # |  Harmonic  |  Fundamental  |   Delta   |')
+                        if references is None:
+                            print('| # |  Harmonic  |  Fundamental  |   Delta   |')
+                        else:
+                            print('| # |  Harmonic  |  Fundamental  |   Delta   | Error |')
                     
             elif start:
                 if self.num_atoms != 2:
@@ -495,8 +520,13 @@ class IGVPT:
                             diff = float(anharm-harm)
                             fundamentals.append(anharm)
                             if print_summary:
-                                print('| {} |   {:.2f}  |    {:.2f}    |  {:.2f}  |'.
+                                if references is None:
+                                    print('| {} |   {:.2f}  |    {:.2f}    |  {:.2f}  |'.
                                       format(mode_num, harm, anharm, diff))
+                                else:
+                                    err = abs(references[mode_num]-anharm)
+                                    print('| {} |   {:.2f}  |    {:.2f}    |  {:.2f}  | {:.2f} |'.
+                                      format(mode_num, harm, anharm, diff, err))
                             mode_num += 1
                         
                         if 'Overtones' in line:
@@ -533,8 +563,7 @@ class IGVPT:
         2. Calculates QFF
         3. Evaluates anharmomics
 
-        Note: Rewrite this where it checks for the existence of each required file so it can report 
-        which are not done. 
+        Note: Rewrite this where it checks for the existence of each required file so it can report        which are not done. 
 
         """
         if not os.path.exists(self.harm_folder + '.checkpoint'):
@@ -591,18 +620,24 @@ class IGVPT:
                     sleep(wait_time)
 
     def approximate_anharmonics_SK(self, descriptor, kernel, print_summary=False,
-                                   use_gs_zeropoint=True, normalize=True):
+                                   prior=None, normalize=True, n_restarts=0, save_all=True,
+                                   concurrent_calculations=1, references=None,
+                                   energy_reference=None):
 
         """
-        Main function for calculating anharmonics by approxixmating the PES with a gaussian process. 
-
-        Steps:
-        1. Calculates the harmonics with specified calculator (self.calc)
-        2. Generates geometries for anharmonics, calculate feature vectors for all geometries
-        3. ??
+        Main function for calculating anharmonics by approxixmating the PES with a
+        gaussian process. 
 
         Parameters:
         -- descriptor: global descriptor object 
+        -- kernel: sklearn compatible kernel object. 
+        -- print_summary: bool
+        -- prior: str, controls the prior settings. One of: 'mean_harmonic', 'groundstate', None
+        -- normalize: bool, whether the MinMaxScaler is applied to the features.
+        -- n_restarts: int, how many times the GP hyperparameter search is restarted.
+        -- save_all: bool, Save GP for every iteration
+        -- references: np.array, correct frequencies.
+        -- energy_references: np.array, correct energies. 
         """
 
         if not os.path.exists(self.harm_folder + '.checkpoint'):
@@ -636,7 +671,6 @@ class IGVPT:
             # Calculate features of all QFF displacements:
             self.features = np.zeros((len(self.QFF_atoms), feature.shape[1]))
             for i, atoms in enumerate(self.QFF_atoms):
-                #self.features[i, :] = descriptor(atoms)
                 self.features[i, :] = descriptor.get_features(atoms)
 
             # Whether or not features are normalized:
@@ -649,42 +683,50 @@ class IGVPT:
 
                 with open(self.ML_folder + 'scaler.pckl', 'wb') as pckl:
                     pickle.dump(scaler, pckl)
-                
 
+            np.save(self.ML_folder + 'normalize_setting.npy', normalize)
+                
             # Intialize Gaussian Process with harmonic calculations:
-            self.GP = GaussianProcessRegressor(kernel=kernel)
+            self.GP = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=n_restarts)
 
             # Ground-state zeropoint:
-            if use_gs_zeropoint:
-                offset = read(self.GS_folder+'job_0/atoms.traj').get_potential_energy()
-                
+            if prior == 'groundstate':
+                offset = read(self.GS_folder+'job_0/atoms.traj').get_potential_energy()              
+            elif prior == 'mean_harmonic':
+                offset = np.mean(E_harm)
             else:
                 offset = 0
+            np.save(self.ML_folder + 'prior.npy', offset)
 
             # Train the GP on the harmonics:
             X_train = harm_features.copy()
-            y_train = E_harm.copy()-offset
-            
+            y_train = E_harm.copy()-offset            
             self.GP.fit(X_train, y_train)
+
 
             self.E_QFF = self.GP.predict(self.features).flatten()
             self.F_QFF = np.zeros((self.num_extra, len(atoms), 3))
 
             self.write_gabs(use_atoms=False)
             self.generate_QFF()
-            self.history.append(self.summarize_results(print_summary=True))
+            self.history.append(self.summarize_results(print_summary=print_summary, references=references))
+            if energy_reference is not None:
+                energy_error = []
 
             # Start adding calculations:
-            self.concurrent_calculations = 1
             self.time_between_checks = 5
 
             remainder = self.num_extra
             index_mask = np.array([False for i in range(self.num_extra)])
+            remaining = np.argwhere(index_mask == False).reshape(-1)
+                         
+            # Save intial structure:
             count = 0
+            if save_all:
+                with open(self.ML_folder+'GP_folder/GP{}.pckl'.format(count), 'wb') as pckl:
+                    pickle.dump(self.GP, pckl)
+            count += 1
 
-            print('Got this far')
-            
-            print(remainder)
             while remainder > 0:
                 # Pick the next configuration(s) to calculate:
                 print('#'*40)
@@ -692,26 +734,27 @@ class IGVPT:
                 
                 # Variance based:
                 _, variance = self.GP.predict(self.features, return_std=True)
-                idxs = np.argsort(-variance)[0:self.concurrent_calculations]
+                variance = variance[remaining]
+                idxs = remaining[np.argsort(-variance)[0:concurrent_calculations]]
                 
                 # Random:
                 #idxs = np.random.choice(np.argwhere(index_mask==False).reshape(-1),
                 #            self.concurrent_calculations)
-                
+
+                # Calculate:
                 self.calculate_and_wait(idxs, self.time_between_checks)
                 
                 # When finished add them to GP
-                E = np.zeros(self.concurrent_calculations) - offset
+                E = np.zeros(concurrent_calculations) - offset
                 for i, idx in enumerate(idxs):
                     atoms = read(self.QFF_folder + 'job_{}/atoms.traj'.format(idx))
-                    E[i] += atoms.get_potential_energy()
+                    E[i] += atoms.get_potential_energy()                    
                     index_mask[idx] = True
                     
-
                 # Add new points to training arrays:
                 X_train = np.vstack([X_train, self.features[idxs, :]])
-                y_train = np.vstack([y_train, E])
-
+                y_train = np.vstack([y_train, E.reshape(-1, 1)])
+                
                 # Re-fit:
                 self.GP.fit(X_train, y_train)
 
@@ -719,17 +762,40 @@ class IGVPT:
                 self.E_QFF = self.GP.predict(self.features).flatten()
                 self.write_gabs(use_atoms=False)
                 self.generate_QFF()
-                self.history.append(self.summarize_results(print_summary=print_summary))
+                self.history.append(self.summarize_results(print_summary=print_summary,
+                                                           references=references))
+
+                # Save GP everytime?
+                if save_all:
+                    with open(self.ML_folder+'GP_folder/GP{}.pckl'.format(count), 'wb') as pckl:
+                        pickle.dump(self.GP, pckl)
+
+                if energy_reference is not None:
+                    E_predict = self.E_QFF + offset
+                    score = np.abs(energy_reference-E_predict)
+                    print('Iteration {}'.format(count))
+                    print('Mean error: {:.8f}'.format(np.mean(score)))
+                    print('Max error: {:.8f}'.format(np.max(score)))
+
+                    energy_error.append([np.mean(score), np.max(score)])
 
                 # Keep track of stuff:
-                remainder -= self.concurrent_calculations
+                remainder -= concurrent_calculations
                 remaining = np.argwhere(index_mask == False).reshape(-1)
                 count += 1
+
+                if remainder < concurrent_calculations:
+                    concurrent_calculations = remainder
+
+
 
             self.history = np.array(self.history)
 
             # Save some important stuff:
             np.save(self.ML_folder + 'history.npy', self.history)
+            if energy_reference is not None:
+                np.save(self.ML_folder + 'energy_error.npy', np.array(energy_error))
+            
 
             with open(self.ML_folder + 'GP.pckl', 'wb') as pickle_file:
                 pickle.dump(self.GP, pickle_file)
@@ -737,7 +803,7 @@ class IGVPT:
             with open(self.ML_folder + 'descriptor.pckl', 'wb') as pickle_file:
                 pickle.dump(descriptor, pickle_file)
 
-                
+    
                 
                 
         
